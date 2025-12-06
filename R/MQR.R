@@ -146,6 +146,8 @@ MQR <- function(Y, X, C = NULL, T_vec, tau = 0.5, M = NULL,
 #' @title Fit MQR with Iterative Algorithm
 #'
 #' @description Internal function implementing the iterative optimization algorithm.
+#' Uses coordinate descent: updates one trait's membership at a time, refitting
+#' all coefficients for each potential assignment, matching the original f_update_new.
 #'
 #' @param Y Outcome matrix
 #' @param X_B Covariate-spline interaction matrix
@@ -172,13 +174,13 @@ fit_MQR_iterative <- function(Y, X_B, C, tau, M, df,
   p_alpha <- ncol(X_B)
 
   # Initialize
-
   alpha <- alpha_init
   xi <- xi_init
   intercept <- intercept_init
   gamma <- gamma_init
 
-  loss_old <- Inf
+  # Compute initial loss
+  loss_min <- compute_loss(Y, X_B, C, alpha, xi, intercept, gamma, tau)
   converged <- FALSE
   n_iter <- 0
 
@@ -186,42 +188,70 @@ fit_MQR_iterative <- function(Y, X_B, C, tau, M, df,
     n_iter <- iter
     gamma_old <- gamma
     alpha_old <- alpha
+    loss_old <- loss_min
 
-    # Step 1: Update coefficients given group membership
+    # Coordinate descent: loop through each trait
+    for (k in 1:K) {
+      # Skip if trait k is the only one in its group (to avoid empty groups)
+      group_sizes <- table(factor(gamma, levels = 1:M))
+      if (group_sizes[gamma[k]] == 1) {
+        next
+      }
+
+      # Try assigning trait k to each group
+      loss_by_group <- rep(0, M)
+
+      for (m in 1:M) {
+        # Temporarily assign trait k to group m
+        gamma_temp <- gamma
+        gamma_temp[k] <- m
+
+        # Refit all coefficients with this temporary assignment
+        update_coef <- update_coefficients(Y, X_B, C, gamma_temp, tau, M)
+
+        # Compute total loss
+        loss_by_group[m] <- compute_loss(Y, X_B, C, update_coef$alpha,
+                                          update_coef$xi, update_coef$intercept,
+                                          gamma_temp, tau)
+      }
+
+      # Assign trait k to group with minimum loss
+      gamma[k] <- which.min(loss_by_group)
+    }
+
+    # Final coefficient update after all traits processed
     update_coef <- update_coefficients(Y, X_B, C, gamma, tau, M)
     alpha <- update_coef$alpha
     xi <- update_coef$xi
     intercept <- update_coef$intercept
 
-    # Step 2: Update group membership given coefficients
-    gamma <- update_membership(Y, X_B, C, alpha, xi, intercept, tau, M)
-
-    # Check convergence
+    # Compute loss after this iteration
     loss_new <- compute_loss(Y, X_B, C, alpha, xi, intercept, gamma, tau)
 
     if (verbose && iter %% 10 == 0) {
       message(sprintf("Iteration %d: loss = %.6f", iter, loss_new))
     }
 
-    # Convergence criteria
+    # Convergence criteria (matching original f_update_new)
+    # Original: if(loss_temp < loss_min & sum(abs(G_old - G_temp)) == 0 & sum(abs(alpha_old - alpha_temp)) < eps)
     gamma_stable <- all(gamma == gamma_old)
     alpha_stable <- max(abs(alpha - alpha_old)) < tol
-    loss_stable <- abs(loss_old - loss_new) < tol
+    loss_stable <- abs(loss_new - loss_old) < tol
 
-    if (gamma_stable && (alpha_stable || loss_stable)) {
+    if (gamma_stable && alpha_stable) {
       converged <- TRUE
       if (verbose) message(sprintf("Converged at iteration %d", iter))
       break
     }
 
-    loss_old <- loss_new
+    loss_min <- min(loss_min, loss_new)
   }
 
-  if (!converged && verbose) {
-    warning("Maximum iterations reached without convergence")
+  if (!converged && iter == max_iter) {
+    if (verbose) warning("Maximum iterations reached without convergence")
   }
 
-  # Reorder groups for identifiability (by first coefficient)
+  # Reorder groups for identifiability
   reorder <- order_groups(alpha, gamma, M)
   alpha <- reorder$alpha
   gamma <- reorder$gamma
