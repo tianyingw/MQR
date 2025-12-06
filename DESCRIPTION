@@ -1,0 +1,34 @@
+Package: MQR
+Title: Joint Time-Varying Quantile Regressions with Multi-Outcome Latent Groups
+Version: 0.1.0
+Authors@R: c(
+    person("Tianying", "Wang", email = "tianying.wang@colostate.edu", role = c("aut", "cre")),
+    person("Yanyuan", "Ma", role = "aut"),
+    person("Ying", "Wei", role = "aut")
+    )
+Description: Implements a novel quantile regression framework for investigating
+    time-dependent covariate effects on multiple outcomes, where different outcome
+    variables may share common covariate effects. The method simultaneously identifies
+    latent group structures and estimates covariate effects without the need to model
+    the multivariate distribution of the response vector. Features include B-spline
+    approximation for time-varying coefficients, iterative optimization for joint
+    estimation of group membership and coefficients, and information criterion-based
+    model selection.
+License: GPL-3
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.3
+Depends:
+    R (>= 3.5.0)
+Imports:
+    quantreg,
+    splines,
+    stats
+Suggests:
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr
+URL: https://github.com/tianyingw/MQR
+BugReports: https://github.com/tianyingw/MQR/issues
