@@ -48,7 +48,7 @@ library(MQR)
 # Simulate data with 3 latent groups
 set.seed(123)
 sim_data <- simulate_MQR_data(
-  n = 200,    # 200 subjects
+  n = 2000,    # 2000 subjects
   K = 10,     # 10 traits
   M = 3,      # 3 latent groups
   J = 1       # 1 time point per subject
