@@ -8,7 +8,9 @@
 #' @return Vector of check loss values
 #' @keywords internal
 rho_tau <- function(u, tau) {
-  abs(u) * ((1 - tau) * (u < 0) + tau * (u >= 0))
+  # Check loss function: rho_tau(u) = |u| * ((1-tau)*I(u<0) + tau*I(u>0))
+  # Matches original: f_rho = function(u, tau){abs(u)*((1-tau)*(u<0)+tau*(u>0))}
+  abs(u) * ((1 - tau) * (u < 0) + tau * (u > 0))
 }
 
 
@@ -50,6 +52,8 @@ compute_loss <- function(Y, X_B, C, alpha, xi, intercept, gamma, tau) {
 #' @title Compute Information Criterion
 #'
 #' @description Compute the BIC-type information criterion for model selection.
+#' Uses formula from paper: IC(M) = L_n/(nK) + log(nK)/(nK) * n_p(M)
+#' where n_p(M) is the number of parameters.
 #'
 #' @param loss Total loss value
 #' @param n Number of observations
@@ -57,13 +61,19 @@ compute_loss <- function(Y, X_B, C, alpha, xi, intercept, gamma, tau) {
 #' @param M Number of groups
 #' @param df B-spline degrees of freedom
 #' @param q Number of additional covariates
+#' @param p Number of primary covariates with time-varying effects (default 1)
 #'
 #' @return IC value
 #' @keywords internal
-compute_IC <- function(loss, n, K, M, df, q) {
+compute_IC <- function(loss, n, K, M, df, q, p = 1) {
   if (is.null(q)) q <- 0
-  n_params <- M * df + K * (q + 1)  # alpha params + xi params + intercepts
-  IC <- loss / (n * K) + log(n * K) / (2 * n * K) * n_params
+  # Number of parameters:
+  # - M * p * df: group-specific alpha coefficients (M groups, p covariates, df basis functions each)
+  # - K * q: trait-specific xi coefficients for C covariates
+  # - K: trait-specific intercepts
+  n_params <- M * p * df + K * (q + 1)
+  # IC formula matching the paper: loss/(nK) + log(nK)/(nK) * n_p
+  IC <- loss / (n * K) + log(n * K) / (n * K) * n_params
   return(IC)
 }
 
@@ -99,6 +109,9 @@ create_XB_interaction <- function(X, B) {
 #' @title Standardize Outcomes by Marginal Rank
 #'
 #' @description Transform outcomes to marginal ranks using quantile regression.
+#' This matches the preprocessing step in the original simulation code:
+#' For each trait, fit QR at multiple tau levels and assign each observation
+#' the tau value corresponding to its position in the conditional distribution.
 #'
 #' @param Y Outcome matrix (n x K)
 #' @param T_vec Time vector
@@ -110,24 +123,28 @@ standardize_by_rank <- function(Y, T_vec, df = 4) {
 
   K <- ncol(Y)
   n <- nrow(Y)
+  # Match original: tau.seq = seq(0.01, 0.99, length = 99)
   tau_seq <- seq(0.01, 0.99, length.out = 99)
 
   Y_std <- matrix(NA, nrow = n, ncol = K)
 
   for (k in 1:K) {
     # Fit quantile regression across tau grid
+    # Match original: rq(...~ bs(..., intercept = F), tau = tau.seq)
     tryCatch({
       fit <- quantreg::rq(Y[, k] ~ splines::bs(T_vec, df = df, intercept = FALSE),
                           tau = tau_seq)
       fitted_vals <- fit$fitted.values
 
-      # Find rank for each observation
+      # Match original logic:
+      # apply(cbind(y, fitted), 1, function(x){x[1+min(which(x[1]<x[-1]), length(tau.seq))]})
+      # This finds: tau_seq[min(which(y_i < fitted_quantiles), length(tau_seq))]
       for (i in 1:n) {
         y_i <- Y[i, k]
-        # Find smallest tau where y_i <= fitted quantile
-        idx <- which(y_i <= fitted_vals[i, ])
+        # Find smallest tau where y_i < fitted quantile (strict less than)
+        idx <- which(y_i < fitted_vals[i, ])
         if (length(idx) == 0) {
-          Y_std[i, k] <- max(tau_seq)
+          Y_std[i, k] <- tau_seq[length(tau_seq)]
         } else {
           Y_std[i, k] <- tau_seq[min(idx)]
         }
@@ -317,7 +334,7 @@ fit_pooled_qr <- function(Y, X_B, C, g_idx, tau) {
 #'
 #' @return List with M_opt (optimal M) and IC_values
 #' @keywords internal
-select_M_by_IC <- function(Y, X_B, C, tau, M_max, df, max_iter, tol, n_init, verbose) {
+select_M_by_IC <- function(Y, X_B, C, tau, M_max, df, max_iter, tol, n_init, verbose, p = 1) {
 
   n_obs <- nrow(Y)
   K <- ncol(Y)
@@ -343,7 +360,7 @@ select_M_by_IC <- function(Y, X_B, C, tau, M_max, df, max_iter, tol, n_init, ver
     loss <- compute_loss(Y, X_B, C, result$alpha, result$xi,
                           result$intercept, result$gamma, tau)
 
-    IC_values[M] <- compute_IC(loss, n_obs, K, M, df, q)
+    IC_values[M] <- compute_IC(loss, n_obs, K, M, df, q, p)
   }
 
   M_opt <- which.min(IC_values)

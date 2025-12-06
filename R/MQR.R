@@ -38,15 +38,22 @@
 #'
 #' @details
 #' The model assumes:
-#' \deqn{Q_{Y_{ik}}(\tau | X_{ik}, T_{ik}, C_{ik}) = X_{ik} \alpha_{\gamma_k}(T_{ik}) + C_{ik}^T \xi_k}
+#' \deqn{Q_{Y_{ik}}(\tau | X_{ik}, T_{ik}, C_{ik}) = \eta_k + X_{ik}^T \alpha_{\gamma_k}(T_{ik}) + C_{ik}^T \xi_k}
 #'
-#' where \eqn{\alpha_m(t)} are group-specific time-varying coefficients approximated
-#' by B-splines, \eqn{\gamma_k \in \{1,...,M\}} is the group membership of trait k,
-#' and \eqn{\xi_k} are trait-specific coefficients.
+#' where \eqn{\eta_k} are trait-specific intercepts, \eqn{\alpha_m(t)} are group-specific
+#' time-varying coefficients approximated by B-splines: \eqn{\alpha_m(t) = B(t)^T \theta_m},
+#' \eqn{\gamma_k \in \{1,...,M\}} is the group membership of trait k,
+#' and \eqn{\xi_k} are trait-specific coefficients for additional covariates.
 #'
 #' The algorithm alternates between:
-#' 1. Updating coefficients (\eqn{\alpha}, \eqn{\xi}) given group membership
-#' 2. Updating group membership (\eqn{\gamma}) given coefficients
+#' 1. Updating coefficients (\eqn{\alpha}, \eqn{\xi}, \eqn{\eta}) given group membership
+#'    by pooling data within groups and fitting quantile regression
+#' 2. Updating group membership (\eqn{\gamma}) given coefficients by assigning each
+#'    trait to the group minimizing its check loss
+#'
+#' Initialization uses k-means clustering on individual trait QR coefficient estimates.
+#' Model selection for M uses a BIC-type information criterion:
+#' \deqn{IC(M) = L_n/(nK) + log(nK)/(nK) \times n_p(M)}
 #'
 #' @examples
 #' # Generate simulated data
@@ -100,7 +107,7 @@ MQR <- function(Y, X, C = NULL, T_vec, tau = 0.5, M = NULL,
   # Select M by information criterion if not provided
   if (is.null(M)) {
     if (verbose) message("Selecting number of groups by IC...")
-    M_select <- select_M_by_IC(Y, X_B, C, tau, M_max, df, max_iter, tol, n_init, verbose)
+    M_select <- select_M_by_IC(Y, X_B, C, tau, M_max, df, max_iter, tol, n_init, verbose, p)
     M <- M_select$M_opt
     if (verbose) message(sprintf("Selected M = %d", M))
   }
@@ -121,7 +128,7 @@ MQR <- function(Y, X, C = NULL, T_vec, tau = 0.5, M = NULL,
   # Compute final loss and IC
   result$loss <- compute_loss(Y, X_B, C, result$alpha, result$xi,
                                result$intercept, result$gamma, tau)
-  result$IC <- compute_IC(result$loss, n_obs, K, M, df, ncol(C))
+  result$IC <- compute_IC(result$loss, n_obs, K, M, df, ncol(C), p)
 
   # Store additional info
   result$M <- M
